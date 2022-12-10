@@ -22,7 +22,7 @@ def color_thresh(img, rgb_thresh=(160, 160, 160)):
 
 # Define a function to convert from image coords to rover coords
 def rover_coords(binary_img):
-    # Identify nonzero pixels
+    # Identify nonzero (white = navigable) pixels
     ypos, xpos = binary_img.nonzero()
     # Calculate pixel positions with reference to the rover position being at the 
     # center bottom of the image.  
@@ -45,6 +45,10 @@ def to_polar_coords(x_pixel, y_pixel):
 def rotate_pix(xpix, ypix, yaw):
     # Convert yaw to radians
     yaw_rad = yaw * np.pi / 180
+    # Rotation Matrix:
+    #[x' y']T = [cos theta  -sin theta,  * [x y]T
+    #            sin theta  cos theta]
+    # theta will be yaw angle
     xpix_rotated = (xpix * np.cos(yaw_rad)) - (ypix * np.sin(yaw_rad))
                             
     ypix_rotated = (xpix * np.sin(yaw_rad)) + (ypix * np.cos(yaw_rad))
@@ -53,6 +57,7 @@ def rotate_pix(xpix, ypix, yaw):
 
 def translate_pix(xpix_rot, ypix_rot, xpos, ypos, scale): 
     # Apply a scaling and a translation
+    # Translation and dividing by scale
     xpix_translated = (xpix_rot / scale) + xpos
     ypix_translated = (ypix_rot / scale) + ypos
     # Return the result  
@@ -79,7 +84,7 @@ def pix_to_world(xpix, ypix, xpos, ypos, yaw, world_size, scale):
 def perspect_transform(img, src, dst):
            
     M = cv2.getPerspectiveTransform(src, dst)
-    warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0]))# keep same size as input image
+    warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0])) #keep same size as input image (input y then x)
     mask = cv2.warpPerspective(np.ones_like(img[:,:,0]),M,(img.shape[1],img.shape[0]))
     return warped, mask
 
@@ -93,10 +98,24 @@ def find_rocks(img, levels=(110,110,50)):
 # Apply the above functions in succession and update the Rover state accordingly
 def perception_step(Rover):
    
+    """
+    Notes:
+    - We will return the updated Rover. Update two params: Rover.vision_image and Rover.worldmap
+    - 
+
+    """   
+   
+   # We first calculate warped Rover perspective and extract the mask
+   # Perspective is warped to bird eye view
+   # We use 10 by 10 pixels to be destination size for one square meter of the grid
+   # Later, we will map the 10 by 10 pixels to the worldmap
     dst_size = 5
     bottom_offset = 6
     image = Rover.img
-    source = np.float32([[14, 140], [301 ,140],[200, 96], [118, 96]])
+    source = np.float32([[14, 140], # bottom left
+                 [301 ,140], # bottom right
+                 [200, 96], 
+                 [118, 96]]) # arbitrarily clockwise or anti-clockwise square (same as destination)
     destination = np.float32([
             [image.shape[1]/2 - dst_size, image.shape[0] - bottom_offset],
             [image.shape[1]/2 + dst_size, image.shape[0] - bottom_offset],
@@ -105,17 +124,22 @@ def perception_step(Rover):
             ])
     
     warped, mask = perspect_transform(Rover.img, source, destination)
-    threshed = color_thresh(warped)
-    obs_map = np.absolute(np.float32(threshed)-1) * mask
+    # Color thresholding function will return B&W image, where navigable = 1
+    threshed = color_thresh(warped) 
+    # Using perspect_transform mask
+    # Note: obs_map not yet worldmap. Needs transformation and mapping
+    obs_map = np.absolute(np.float32(threshed)-1) * mask 
     
     
-    Rover.vision_image[:,:,2] = threshed * 255 #blue navigable
-    Rover.vision_image[:,:,0] = obs_map * 255 #red obs
-    #Rover.vision_image[:,:,1]  #green rock
+    Rover.vision_image[:,:,2] = threshed * 255 #b navigable
+    Rover.vision_image[:,:,0] = obs_map * 255 #r obs
+    #Rover.vision_image[:,:,1]  #g rock
              
+    # Mapping the warped threshed image into the world map
     xpix, ypix = rover_coords(threshed)
     world_size = Rover.worldmap.shape[0]
-    scale = 2 * dst_size
+    scale = 2 * dst_size 
+    # Scaling 10 by 10 pixels in front of robot to world size
     x_world, y_world = pix_to_world(xpix, ypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
     
     obsxpix, obsypix = rover_coords(obs_map) 
