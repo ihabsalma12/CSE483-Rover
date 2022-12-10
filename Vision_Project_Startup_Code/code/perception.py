@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+import keyboard # detect key presses
 
 # Identify pixels above the threshold
 # Threshold of RGB > 160 does a nice job of identifying ground pixels only
@@ -20,7 +21,33 @@ def color_thresh(img, rgb_thresh=(160, 160, 160)):
 #threshed = color_thresh(warped)
 #plt.imshow(threshed, cmap='gray')
 
+ 
 # Define a function to convert from image coords to rover coords
+# rover_coords
+############With respect to rover############:
+#The x-axis direction of the rover is is located at the center of the rover pointing in the forward #direction of the navigable train (with respect to the rover)
+
+
+############With respect to Us############:
+#the origin is at the bottom left and the x-axis positive direction is pointing towards the right #direction
+
+
+############purpose of this function############:
+#map the coordinates of the rover (that have different x-axis direction) into an image that have the #origin at the left and have x-axis pointing towards the right direction
+
+
+############output of the function############:
+#x-pixel , y-pixel are the new coordinates of the rover in the new image that have the origin at the left #and have x-axis pointing towards the right direction
+
+############Implementation of the function############: 
+#there are three operations
+#1-mapping: the x-axis of the rover will be the y-axis of the new image
+          #: the y-axis of the rover will be the x-axis of the new image
+#2-Then  Use the equation of the Reflection
+
+##NOTE:
+# binary_img.shape[0]: represents the height the image(number of rows pixels)    
+#(binary_img.shape[1]/2) represents the width of the image divided by 2(column pixels/2)
 def rover_coords(binary_img):
     # Identify nonzero (white = navigable) pixels
     ypos, xpos = binary_img.nonzero()
@@ -41,7 +68,20 @@ def to_polar_coords(x_pixel, y_pixel):
     angles = np.arctan2(y_pixel, x_pixel)
     return dist, angles
 
+
 # Define a function to map rover space pixels to world space
+#rotate_pix function
+############purpose of this function############:
+#Map the axis of the rover x and the rover y to the world x and world y 
+#this could be done by the rotation around the z-axis with the yaw rate of the robot
+
+############output of the function############:
+#the axis of the rover x and the rover y will be parallel to the axis of the world x and world y
+#the function will return the x_pixel and y_pixel after rotation
+  
+############Implementation of the function############: 
+#1- convert the yaw angle to radian by multiplying with (pi/180) 
+#2- Multiply the position vector of the pixel with rotation matrix
 def rotate_pix(xpix, ypix, yaw):
     # Convert yaw to radians
     yaw_rad = yaw * np.pi / 180
@@ -57,7 +97,7 @@ def rotate_pix(xpix, ypix, yaw):
 
 def translate_pix(xpix_rot, ypix_rot, xpos, ypos, scale): 
     # Apply a scaling and a translation
-    # Translation and dividing by scale
+    # Translation and DIVIDING BY SCALE
     xpix_translated = (xpix_rot / scale) + xpos
     ypix_translated = (ypix_rot / scale) + ypos
     # Return the result  
@@ -95,20 +135,49 @@ def find_rocks(img, levels=(110,110,50)):
     
     return color_select
 
+
+class DebugListener():
+    def __init__(self):
+        self.debug_flag = False
+        while True:  # making a loop
+            try:  # used try so that if user pressed other than the given key error will not be shown
+                if keyboard.is_pressed('q'):  # if key 'q' is pressed 
+                    print('You Pressed A Key!')
+                    break  # finishing the loop
+            except:
+                break  # if user pressed a key other than the given key the loop will break
+		    
+
 # Apply the above functions in succession and update the Rover state accordingly
 def perception_step(Rover):
+
+    debugger = DebugListener()
+   
    
     """
-    Notes:
-    - We will return the updated Rover. Update two params: Rover.vision_image and Rover.worldmap
-    - 
-
+    We will return the updated Rover. Update two params: Rover.vision_image and Rover.worldmap
     """   
    
    # We first calculate warped Rover perspective and extract the mask
    # Perspective is warped to bird eye view
    # We use 10 by 10 pixels to be destination size for one square meter of the grid
    # Later, we will map the 10 by 10 pixels to the worldmap
+
+#perspect_transform
+############purpose of this function############:
+#1-Generate the mask of the bird eye view 
+#2-apply the mask on the image to produce an image with the bird eye view
+
+############Implementation of the function############: 
+#Step1:
+#M = cv2.getPerspectiveTransform(src, dst) 
+#generation of the mask is done by having src points and dst points in order to estimate the value of the M
+
+#Step2:
+#warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0]))
+#apply the filter M on the image (img) and 
+#the result will be a new image with dimention (img.shape[1], img.shape[0]) which is the same size of the input image
+
     dst_size = 5
     bottom_offset = 6
     image = Rover.img
@@ -134,10 +203,13 @@ def perception_step(Rover):
     Rover.vision_image[:,:,2] = threshed * 255 #b navigable
     Rover.vision_image[:,:,0] = obs_map * 255 #r obs
     #Rover.vision_image[:,:,1]  #g rock
-             
+         
+
+
     # Mapping the warped threshed image into the world map
+    # Reflection and centering
     xpix, ypix = rover_coords(threshed)
-    world_size = Rover.worldmap.shape[0]
+    world_size = Rover.worldmap.shape[0] # init world_size so we can map to it
     scale = 2 * dst_size 
     # Scaling 10 by 10 pixels in front of robot to world size
     x_world, y_world = pix_to_world(xpix, ypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
@@ -150,7 +222,6 @@ def perception_step(Rover):
     
     dist, angles = to_polar_coords(xpix,ypix)
     Rover.nav_angles = angles 
-    
     
     
     rock_map = find_rocks(warped, levels=(110,110,50))
