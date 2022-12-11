@@ -1,9 +1,39 @@
-import numpy as np
 import cv2
-import keyboard # detect key presses
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import scipy.misc
+import glob
+import imageio
+
 
 # Identify pixels above the threshold
 # Threshold of RGB > 160 does a nice job of identifying ground pixels only
+#color_thresh
+############purpose of this function############:
+#We need to identify pixels that are above certain value of threshold 
+#In case of the ground pixels we can use value of RGB threshold greater than 160 
+#Apply that threshold on the input image
+
+############Input of the function############:
+#1-Input Image (the theshold will be applied to it)
+#2-RGB threshold value
+
+############output of the function############:
+#Binary image that contain ones in the pixels above the threshold values.
+
+############Implementation of the function############: 
+#1-Create an aray of zeros with size X*Y of the image, the array will be single channel
+#color_select = np.zeros_like(img[:,:,0])
+
+#2-Check that each pixel of the array is above the three threshold values in RGB
+#  First  condition: pixels values above the Red   threshold
+#  Second condition: pixels values above the Green threshold
+#  Third  condition: pixels values above the Blue  threshold
+# above_thresh will now contain a boolean array with "True" where threshold was met 
+    
+# 3- the index of the color_select array will be accessed by above_thresh
+#    Set the value of that pixel with one to produce a binary image.   
 def color_thresh(img, rgb_thresh=(160, 160, 160)):
     # Create an array of zeros same xy size as img, but single channel
     color_select = np.zeros_like(img[:,:,0])
@@ -95,6 +125,19 @@ def rotate_pix(xpix, ypix, yaw):
     # Return the result  
     return xpix_rotated, ypix_rotated
 
+#translate_pix function
+############purpose of this function############:
+#Apply scaling to adjust/fix the size of objects in the world map and translation to reposition the rover x and y axis to start from the origin
+#of the world's x and y axis.
+
+############output of the function############:
+#the size of objects in the map will be adjusted/scaled 
+#the axis of the rover x and the rover y will be poistioned at/will originate from the origin of the world x and world y
+#the function will return the x_pixel and y_pixel after translation and scaling 
+  
+############Implementation of the function############: 
+#1- divide the input x and y values by scale value
+#2- add xpos and ypos respectively to the x and y values to apply translation 
 def translate_pix(xpix_rot, ypix_rot, xpos, ypos, scale): 
     # Apply a scaling and a translation
     # Translation and DIVIDING BY SCALE
@@ -106,6 +149,17 @@ def translate_pix(xpix_rot, ypix_rot, xpos, ypos, scale):
 
 # Define a function to apply rotation and translation (and clipping)
 # Once you define the two functions above this function should work
+#pix_to_world function
+############purpose of this function############:
+#Call the rotate_pix function and the translate_pix function as well as apply clipping.
+
+############output of the function############:
+#the function will return the x_pixel and y_pixel values after rotation, scaling, translation, and clipping
+
+############Implementation of the function############: 
+#1- call rotate_pix and translate_pix
+#2- clip the x and y values using np.clip
+#3- return the final x and y values that will be mapped onto the world
 def pix_to_world(xpix, ypix, xpos, ypos, yaw, world_size, scale):
     # Apply rotation
     xpix_rot, ypix_rot = rotate_pix(xpix, ypix, yaw)
@@ -118,9 +172,21 @@ def pix_to_world(xpix, ypix, xpos, ypos, yaw, world_size, scale):
     return x_pix_world, y_pix_world
     
 
-
-
 # Define a function to perform a perspective transform
+#perspect_transform
+############purpose of this function############:
+#1-Generate the mask of the bird eye view 
+#2-apply the mask on the image to produce an image with the bird eye view
+
+############Implementation of the function############: 
+#Step1:
+#M = cv2.getPerspectiveTransform(src, dst) 
+#generation of the mask is done by having src points and dst points in order to estimate the value of the M
+
+#Step2:
+#warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0]))
+#apply the filter M on the image (img) and 
+#the result will be a new image with dimention (img.shape[1], img.shape[0]) which is the same size of the input image
 def perspect_transform(img, src, dst):
            
     M = cv2.getPerspectiveTransform(src, dst)
@@ -128,6 +194,7 @@ def perspect_transform(img, src, dst):
     mask = cv2.warpPerspective(np.ones_like(img[:,:,0]),M,(img.shape[1],img.shape[0]))
     return warped, mask
 
+# Color threshing, but rocks 
 def find_rocks(img, levels=(110,110,50)):
     rockpix = ((img[:,:,0] > levels[0]) & (img[:,:,1] > levels[1]) & (img[:,:,2] < levels[2]))
     color_select = np.zeros_like(img[:,:,0])
@@ -136,22 +203,13 @@ def find_rocks(img, levels=(110,110,50)):
     return color_select
 
 
-class DebugListener():
-    def __init__(self):
-        self.debug_flag = False
-        while True:  # making a loop
-            try:  # used try so that if user pressed other than the given key error will not be shown
-                if keyboard.is_pressed('q'):  # if key 'q' is pressed 
-                    print('You Pressed A Key!')
-                    break  # finishing the loop
-            except:
-                break  # if user pressed a key other than the given key the loop will break
 		    
 
 # Apply the above functions in succession and update the Rover state accordingly
 def perception_step(Rover):
 
-    debugger = DebugListener()
+	#debugger flag
+    debugger = False # to enable debugging mode, set to True
    
    
     """
@@ -222,7 +280,7 @@ def perception_step(Rover):
     
     dist, angles = to_polar_coords(xpix,ypix)
     Rover.nav_angles = angles 
-    
+    mean_dir = np.mean(angles)
     
     rock_map = find_rocks(warped, levels=(110,110,50))
     
@@ -242,7 +300,28 @@ def perception_step(Rover):
     else:
         Rover.vision_image[:,:,1] = 0
        
-    
+    # debugger saves realtime images of autonomous mode in folder pipeline_realtime
+    if debugger == True:
+        fig = plt.figure(figsize=(12,9))
+        plt.subplot(221)
+        plt.imshow(image)
+        plt.subplot(222)
+        plt.imshow(warped)
+        plt.subplot(223)
+        plt.imshow(threshed, cmap='gray')
+        plt.subplot(224)
+        plt.plot(xpix, ypix, '.')
+        plt.ylim(-160, 160)
+        plt.xlim(0, 160)
+        arrow_length = 100
+        x_arrow = arrow_length * np.cos(mean_dir)
+        y_arrow = arrow_length * np.sin(mean_dir)
+        plt.arrow(0, 0, x_arrow, y_arrow, color='red', zorder=2, head_width=10, width=2)
+        
+        idx = np.random.randint(0, 999999999)
+        fig.savefig('../pipeline_realtime/Image' + str(idx) + '.jpg')
+        plt.close(fig)
+
  
     
     
